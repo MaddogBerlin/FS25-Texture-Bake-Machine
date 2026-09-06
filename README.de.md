@@ -1,3 +1,5 @@
+![FS25 Texture-Bake-Machine](images/banner.png)
+
 # FS25 Texture-Bake-Machine
 
 **Version 1.0.0** · **Entwickler: Maddog Design & Djain**  
