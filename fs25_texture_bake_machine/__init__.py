@@ -448,6 +448,7 @@ def _draw_mask_channel(context, layout, settings, title, color_name, channel_pro
             and obj is not None
             and obj.type == "MESH"
             and obj.data.uv_layers
+            and channel_image is not None
         )
         bake.operator("fs25_bake.bake_ao_channel", text="BAKE AO", icon="RENDER_STILL")
     save = actions.row(align=True)
@@ -460,6 +461,9 @@ def _draw_mask_channel(context, layout, settings, title, color_name, channel_pro
         warning = layout.box()
         warning.alert = True
         warning.label(text="Cycles must be active for native AO baking.", icon="ERROR")
+    elif image_prop == "ao_image" and channel_image is None:
+        notice = layout.box()
+        notice.label(text="Create or select an AO image before baking.", icon="INFO")
 
 
 def _draw_material_map_bake(context, layout, settings, label, map_type, image_prop):
@@ -704,6 +708,31 @@ def _activate_channel_image_for_painting(context, image):
             if hasattr(space, "image"):
                 space.image = image
 
+    # Some workspaces rebuild their paint slots immediately after a material or
+    # image change. Repeat the synchronization on Blender's next UI tick so the
+    # freshly created channel remains the active paint canvas.
+    image_name = image.name
+
+    def _deferred_activate():
+        current = bpy.data.images.get(image_name)
+        if current is None:
+            return None
+        scene = getattr(bpy.context, "scene", None)
+        if scene is not None:
+            paint = scene.tool_settings.image_paint
+            if hasattr(paint, "canvas"):
+                try:
+                    paint.canvas = current
+                except (AttributeError, TypeError, RuntimeError):
+                    pass
+        for screen in bpy.data.screens:
+            for area in screen.areas:
+                if area.type == "IMAGE_EDITOR" and hasattr(area.spaces.active, "image"):
+                    area.spaces.active.image = current
+        return None
+
+    bpy.app.timers.register(_deferred_activate, first_interval=0.05)
+
 
 class _FS25BAKE_OT_new_black_channel:
     image_name_input: StringProperty(name="Name", default="")
@@ -782,18 +811,28 @@ class FS25BAKE_OT_bake_ao_channel(Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
+        settings = getattr(context.scene, "fs25_bake_settings", None)
         return bool(
             context.scene.render.engine == "CYCLES"
             and obj is not None
             and obj.type == "MESH"
             and obj.data.uv_layers
+            and settings is not None
+            and settings.ao_image is not None
         )
 
     def execute(self, context):
         settings = context.scene.fs25_bake_settings
-        width, height = _output_size(settings, settings.ao_image)
+        target_image = settings.ao_image
+        if target_image is None:
+            self.report({"ERROR"}, "Create or select an AO image before baking")
+            return {"CANCELLED"}
+        width, height = int(target_image.size[0]), int(target_image.size[1])
+        if width < 1 or height < 1:
+            self.report({"ERROR"}, "The selected AO image has no image data")
+            return {"CANCELLED"}
         try:
-            image = _bake_mesh_ao(context, width, height)
+            image = _bake_mesh_ao(context, width, height, target_image=target_image)
             settings.ao_image = image
             _assign_channel_image_node(context, image, "ao_image")
             _activate_channel_image_for_painting(context, image)
@@ -1187,14 +1226,17 @@ def _refresh_mask_preview(settings):
     return settings.mask_preview_display_image
 
 
-def _bake_mesh_ao(context, width, height):
+def _bake_mesh_ao(context, width, height, target_image=None):
     obj = context.active_object
     if obj is None or obj.type != "MESH":
         raise RuntimeError("A mesh must be active for AO")
     if not obj.data.uv_layers:
         raise RuntimeError("The active mesh has no UV map")
 
-    image = bpy.data.images.new("FS25_AO_Bake", width=width, height=height, alpha=True)
+    image = target_image
+    owns_image = image is None
+    if image is None:
+        image = bpy.data.images.new("FS25_AO_Bake", width=width, height=height, alpha=True)
     scene = context.scene
     previous_engine = scene.render.engine
     previous_mode = obj.mode
@@ -1237,7 +1279,7 @@ def _bake_mesh_ao(context, width, height):
         image.update()
         return image
     except Exception:
-        if image.name in bpy.data.images:
+        if owns_image and image.name in bpy.data.images:
             bpy.data.images.remove(image)
         raise
     finally:

@@ -47,6 +47,7 @@ _DE = {
     "Bake AO": "AO backen",
     "BAKE AO": "AO BACKEN",
     "Cycles must be active for native AO baking.": "Cycles muss für das native AO-Baking aktiv sein.",
+    "Create or select an AO image before baking.": "Vor dem Backen ein AO-Bild erstellen oder auswählen.",
     "AO Bake Settings": "AO-Bake-Einstellungen",
     "AO BAKE SETTINGS": "AO-BAKE-EINSTELLUNGEN",
     "Bake Type": "Bake-Typ",
