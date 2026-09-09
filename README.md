@@ -2,12 +2,29 @@
 
 # FS25 Texture-Bake-Machine
 
-**Version 1.0.0** · **Maintainers: Maddog Design & Djain**  
+**Version 1.0.1** · **Maintainers: Maddog Design & Djain**  
 [Deutsche Dokumentation](README.de.md)
 
 A Blender add-on for preparing and packing texture maps for GIANTS Farming Simulator 25 workflows. It combines recurring channel-packing and texture-atlas tasks in one compact Blender sidebar tool.
 
 Tested with Blender **4.0.2**, **4.5.9 LTS**, **5.1.2**, and **5.2.1 LTS**.
+
+## Update 1.0.1
+
+- Newly created Wear, AO, and Dirt textures use the correct black RGBA values. The active material is renamed to **Wear-Mask**, **AO-Mask**, or **Dirt-Mask** as appropriate.
+- The name, width, and height of a new channel texture can be set in the New dialog.
+- The width, height, and color depth of the assigned channel texture are displayed directly in the add-on.
+- Newly created or baked channel textures are activated automatically as the Texture Paint canvas and in the Image Editors of all existing workspaces.
+- Selected mesh faces are assigned automatically to the active mask material; when no faces are selected, the full mesh is used.
+- The Image Texture node is connected automatically to **Principled BSDF → Base Color**, and the material in use is shown in the add-on. An existing regular material is reused for the first mask channel. Additional mask channels receive their own slots, while an existing channel material is reused without duplication.
+- Native AO baking and its essential settings are available directly in the add-on; a notice appears when Cycles is not active.
+- Wear, AO, and Dirt images can be saved individually. An asterisk on **Save Image\*** indicates unsaved changes.
+- AO bake settings open automatically when an AO texture is created or loaded.
+- Selection fields and labels were aligned for a cleaner, consistent layout.
+- The new **Material Bakes** section detects Diffuse and Normal sources on the active Principled BSDF and bakes them through the active bake UV. Existing node mapping, including its scale, is evaluated.
+- Diffuse and Normal results are created as RGBA/32-bit images and can be saved separately. Normal results use Non-Color data.
+- The mMask/vMask preview refreshes automatically. Single channels are shown in grayscale, multiple channels in RGB, and **Combined RGB** as the fully packed mask.
+- Preview inversion leaves the source image untouched. Regardless of the inspection view, **Save** always writes the combined mMask or vMask.
 
 ## Installation and shader source
 
@@ -17,7 +34,7 @@ Install and enable the add-on in Blender's Preferences. In the add-on preference
 
 ## Tool profiles
 
-Open the **FS25 Bake** tab in the 3D View sidebar and select the required workflow:
+Open the **FS25 Bake Machine** tab in the 3D View sidebar and select the required workflow:
 
 - **Building Shader – mMask**
 - **Vehicle Shader – vMask**
@@ -39,7 +56,9 @@ The mMask and vMask profiles use the same compact channel-assignment workflow. S
 | Blue | Dirt |
 | Alpha | Optional additional channel |
 
-The add-on validates the active mesh and UV setup, packs the selected maps, provides a combined preview, and exports the result with the profile-specific filename suffix (`_mMask.png` or `_vMask.png`).
+The add-on validates the active mesh and UV setup, packs the selected maps, and exports the result with the profile-specific filename suffix (`_mMask.png` or `_vMask.png`). An existing UV1 or UV2 can be used as the bake UV; existing UV data is never changed without the user's intent.
+
+The preview responds immediately to its channel selection. A single channel is shown in grayscale, multiple active channels are shown together in their RGB colors, and **Combined RGB** displays the finished packed mask.
 
 ![mMask and vMask workflow](images/mmask-vmask.png)
 
@@ -57,6 +76,12 @@ Custom Specular creates a packed RGB specular texture without requiring a GIANTS
 Material Metallic and Roughness values can be read directly from the active Principled BSDF or entered manually.
 
 ![Custom Specular settings](images/custom-specular.png)
+
+## Material bakes and ambient occlusion
+
+The shared **Material Bakes** section is available in the mMask, vMask, and Custom Specular profiles. It detects Diffuse and Normal sources on the active Principled BSDF and bakes them through the active bake UV into new RGBA/32-bit images. Existing node mapping, including its scale, is evaluated during the bake. Diffuse and Normal each provide their own **Save Image** action.
+
+AO can be baked directly into the assigned AO image with Cycles. Bake Type, Target, Clear Image, Margin Type, and Margin Size are available in the AO section. The result is then reactivated as the AO material, Texture Paint target, and Image Editor image.
 
 ## Texture Array | Atlas
 

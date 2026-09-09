@@ -1,7 +1,7 @@
 bl_info = {
     "name": "FS25 Texture-Bake-Machine",
     "author": "Maddog Design & Djain",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (4, 0, 0),
     "location": "3D View > Sidebar > FS25 Bake",
     "description": "GIANTS FS25 shader-aware texture bake workflow",
@@ -155,12 +155,41 @@ CHANNEL_ITEMS = (
     ("CUSTOM", "Custom", "Custom mask"),
     ("NONE", "None", "Leave channel unused"),
 )
+CHANNEL_LABELS = {identifier: label for identifier, label, _description in CHANNEL_ITEMS}
 
 
 def _update_preview_channel(settings, _context):
     settings.preview_combined = False
     if not (settings.preview_wear or settings.preview_ao or settings.preview_dirt):
         settings.preview_ao = True
+        return
+    _refresh_mask_preview_safe(settings)
+
+
+def _update_preview_combined(settings, _context):
+    _refresh_mask_preview_safe(settings)
+
+
+def _update_mask_source(settings, _context):
+    _refresh_mask_preview_safe(settings)
+
+
+def _update_ao_image(settings, _context):
+    """Reveal AO bake controls as soon as an AO image is assigned."""
+    if settings.ao_image is not None:
+        settings.show_ao_bake_settings = True
+    _refresh_mask_preview_safe(settings)
+
+
+def _refresh_mask_preview_safe(settings):
+    """Refresh previews from RNA callbacks without breaking Blender UI updates."""
+    try:
+        _refresh_mask_preview(settings)
+        for screen in bpy.data.screens:
+            for area in screen.areas:
+                area.tag_redraw()
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        pass
 
 
 def _blend_directory_display(_settings):
@@ -212,17 +241,23 @@ class FS25BakeSettings(PropertyGroup):
         ),
         default="AUTO",
     )
-    channel_r: EnumProperty(name="R", items=CHANNEL_ITEMS, default="WEAR_GLOSS")
-    channel_g: EnumProperty(name="G", items=CHANNEL_ITEMS, default="AO")
-    channel_b: EnumProperty(name="B", items=CHANNEL_ITEMS, default="DIRT")
-    channel_a: EnumProperty(name="A", items=CHANNEL_ITEMS, default="NONE")
-    wear_image: PointerProperty(name="Wear / Gloss", type=bpy.types.Image)
-    ao_image: PointerProperty(name="AO", type=bpy.types.Image)
-    dirt_image: PointerProperty(name="Dirt", type=bpy.types.Image)
-    moss_image: PointerProperty(name="Moss", type=bpy.types.Image)
+    channel_r: EnumProperty(name="R", items=CHANNEL_ITEMS, default="WEAR_GLOSS", update=_update_mask_source)
+    channel_g: EnumProperty(name="G", items=CHANNEL_ITEMS, default="AO", update=_update_mask_source)
+    channel_b: EnumProperty(name="B", items=CHANNEL_ITEMS, default="DIRT", update=_update_mask_source)
+    channel_a: EnumProperty(name="A", items=CHANNEL_ITEMS, default="NONE", update=_update_mask_source)
+    wear_image: PointerProperty(name="Wear / Gloss", type=bpy.types.Image, update=_update_mask_source)
+    ao_image: PointerProperty(name="AO", type=bpy.types.Image, update=_update_ao_image)
+    dirt_image: PointerProperty(name="Dirt", type=bpy.types.Image, update=_update_mask_source)
+    wear_material: PointerProperty(name="Wear Material", type=bpy.types.Material)
+    ao_material: PointerProperty(name="AO Material", type=bpy.types.Material)
+    dirt_material: PointerProperty(name="Dirt Material", type=bpy.types.Material)
+    moss_image: PointerProperty(name="Moss", type=bpy.types.Image, update=_update_mask_source)
     packed_preview_image: PointerProperty(name="Combined RGB", type=bpy.types.Image)
+    mask_preview_display_image: PointerProperty(name="Mask Preview", type=bpy.types.Image)
     specular_diffuse_image: PointerProperty(name="Diffuse", type=bpy.types.Image)
     specular_normal_image: PointerProperty(name="Normal", type=bpy.types.Image)
+    baked_diffuse_image: PointerProperty(name="Baked Diffuse", type=bpy.types.Image)
+    baked_normal_image: PointerProperty(name="Baked Normal", type=bpy.types.Image)
     specular_ao_image: PointerProperty(name="AO Texture", type=bpy.types.Image)
     specular_preview_image: PointerProperty(name="Specular RGB", type=bpy.types.Image)
     specular_ao_mode: EnumProperty(
@@ -284,15 +319,30 @@ class FS25BakeSettings(PropertyGroup):
         description="Manually selected export folder",
         subtype="DIR_PATH",
     )
-    preview_combined: BoolProperty(name="Combined RGB", default=True)
+    preview_combined: BoolProperty(name="Combined RGB", default=True, update=_update_preview_combined)
     preview_wear: BoolProperty(name="Wear R", default=False, update=_update_preview_channel)
     preview_ao: BoolProperty(name="AO G", default=True, update=_update_preview_channel)
     preview_dirt: BoolProperty(name="Dirt B", default=False, update=_update_preview_channel)
+    invert_red_preview: BoolProperty(default=False, options={"HIDDEN"})
+    invert_green_preview: BoolProperty(default=False, options={"HIDDEN"})
+    invert_blue_preview: BoolProperty(default=False, options={"HIDDEN"})
     show_mmask: BoolProperty(name="mMask", default=False)
-    show_preview: BoolProperty(name="Mask Preview", default=False)
+    show_preview: BoolProperty(name="Mask Preview", default=False, update=_update_mask_source)
     show_vmask: BoolProperty(name="vMask", default=False)
     show_custom: BoolProperty(name="Custom Mask", default=False)
     show_export: BoolProperty(name="Export", default=False)
+    show_material_bakes: BoolProperty(name="Material Bakes", default=False)
+    show_ao_bake_settings: BoolProperty(name="AO Bake Settings", default=False)
+    ao_bake_type_display: EnumProperty(
+        name="Bake Type",
+        items=(("AO", "Ambient Occlusion", "Native Cycles ambient occlusion bake"),),
+        default="AO",
+    )
+    ao_bake_target_display: EnumProperty(
+        name="Target",
+        items=(("IMAGE_TEXTURES", "Image Textures", "Bake into the assigned AO image"),),
+        default="IMAGE_TEXTURES",
+    )
     atlas_map_type: EnumProperty(
         name="Atlas Type",
         items=(
@@ -332,13 +382,118 @@ def _draw_centered_title(layout, text: str, icon: str = "NONE"):
     title_row.label(text=text, icon=icon)
 
 
-def _draw_mask_channel(layout, settings, title, color_name, channel_prop, image_prop):
+def _draw_labeled_prop(layout, data, prop_name: str, label: str):
+    """Keep labeled controls aligned at one consistent middle width."""
+    split = layout.split(factor=0.36, align=True)
+    split.label(text=label)
+    split.prop(data, prop_name, text="")
+
+
+def _draw_mask_channel(context, layout, settings, title, color_name, channel_prop, image_prop):
     """Draw one compact RGB(A) assignment and its native Blender image field."""
     _draw_centered_title(layout, title)
-    selection = layout.row(align=True)
-    selection.label(text=f"{color_name}:")
-    selection.prop(settings, channel_prop, text="")
-    layout.template_ID(settings, image_prop, new="image.new", open="image.open")
+    _draw_labeled_prop(layout, settings, channel_prop, f"{color_name}:")
+    new_operators = {
+        "wear_image": "fs25_bake.new_black_wear",
+        "ao_image": "fs25_bake.new_black_ao",
+        "dirt_image": "fs25_bake.new_black_dirt",
+    }
+    layout.template_ID(settings, image_prop, new=new_operators[image_prop], open="image.open")
+    channel_image = getattr(settings, image_prop)
+    material_props = {
+        "wear_image": "wear_material",
+        "ao_image": "ao_material",
+        "dirt_image": "dirt_material",
+    }
+    channel_material = getattr(settings, material_props[image_prop])
+    if channel_material is not None:
+        material_display = layout.row(align=True)
+        material_display.prop(channel_material, "name", text="", icon="MATERIAL")
+    if channel_image is not None:
+        width, height = (int(channel_image.size[0]), int(channel_image.size[1]))
+        depth = int(channel_image.depth)
+        _draw_info_row(
+            layout,
+            "Texture Size",
+            f"{width} × {height} px · {depth} Bit",
+        )
+
+    if image_prop == "ao_image":
+        bake_panel = layout.column(align=True)
+        header = bake_panel.row(align=True)
+        header.prop(
+            settings,
+            "show_ao_bake_settings",
+            text="",
+            icon="TRIA_DOWN" if settings.show_ao_bake_settings else "TRIA_RIGHT",
+            emboss=False,
+        )
+        header.label(text="AO BAKE SETTINGS", icon="SETTINGS")
+        if settings.show_ao_bake_settings:
+            native_bake = context.scene.render.bake
+            info = bake_panel.column(align=False)
+            _draw_labeled_prop(info, settings, "ao_bake_type_display", "Bake Type:")
+            _draw_labeled_prop(info, settings, "ao_bake_target_display", "Target:")
+            info.prop(native_bake, "use_clear", text="Clear Image")
+            if hasattr(native_bake, "margin_type"):
+                _draw_labeled_prop(info, native_bake, "margin_type", "Margin Type:")
+            _draw_labeled_prop(info, native_bake, "margin", "Margin Size")
+
+    actions = layout.row(align=True)
+    if image_prop == "ao_image":
+        bake = actions.row(align=True)
+        obj = context.active_object
+        bake.enabled = bool(
+            context.scene.render.engine == "CYCLES"
+            and obj is not None
+            and obj.type == "MESH"
+            and obj.data.uv_layers
+        )
+        bake.operator("fs25_bake.bake_ao_channel", text="BAKE AO", icon="RENDER_STILL")
+    save = actions.row(align=True)
+    save.enabled = channel_image is not None
+    save_label = "SAVE IMAGE*" if channel_image is not None and channel_image.is_dirty else "SAVE IMAGE"
+    operator = save.operator("fs25_bake.save_channel_image", text=save_label, icon="FILE_TICK")
+    operator.image_prop = image_prop
+
+    if image_prop == "ao_image" and context.scene.render.engine != "CYCLES":
+        warning = layout.box()
+        warning.alert = True
+        warning.label(text="Cycles must be active for native AO baking.", icon="ERROR")
+
+
+def _draw_material_map_bake(context, layout, settings, label, map_type, image_prop):
+    """Draw one native material-map bake result with bake and save actions."""
+    _draw_centered_title(layout, f"{label} Bake")
+    layout.template_ID(settings, image_prop, open="image.open")
+    image = getattr(settings, image_prop)
+    if image is not None:
+        width, height = int(image.size[0]), int(image.size[1])
+        _draw_info_row(layout, "Texture Size", f"{width} × {height} px · {int(image.depth)} Bit")
+
+    actions = layout.row(align=True)
+    obj = context.active_object
+    can_bake = bool(
+        context.scene.render.engine == "CYCLES"
+        and obj is not None
+        and obj.type == "MESH"
+        and obj.data.uv_layers
+        and obj.material_slots
+    )
+    bake = actions.row(align=True)
+    bake.enabled = can_bake
+    operator = bake.operator(
+        "fs25_bake.bake_material_map",
+        text=f"BAKE {label.upper()}",
+        icon="RENDER_STILL",
+    )
+    operator.map_type = map_type
+
+    save = actions.row(align=True)
+    save.enabled = image is not None
+    save_label = "SAVE IMAGE*" if image is not None and image.is_dirty else "SAVE IMAGE"
+    operator = save.operator("fs25_bake.save_channel_image", text=save_label, icon="FILE_TICK")
+    operator.image_prop = image_prop
 
 
 def _active_mesh_uv_info(context):
@@ -429,6 +584,315 @@ def _draw_shader_activation(layout, settings):
     )
 
 
+def _assign_channel_image_node(context, image, image_prop: str):
+    """Create a dedicated channel material and connect its image to Base Color."""
+    obj = context.active_object
+    if obj is None or obj.type != "MESH":
+        return None
+
+    settings = context.scene.fs25_bake_settings
+    material_props = {
+        "wear_image": "wear_material",
+        "ao_image": "ao_material",
+        "dirt_image": "dirt_material",
+    }
+    material_names = {
+        "wear_image": "Wear-Mask",
+        "ao_image": "AO-Mask",
+        "dirt_image": "Dirt-Mask",
+    }
+    material_prop = material_props[image_prop]
+    material = None
+    slot_index = None
+    for index, slot in enumerate(obj.material_slots):
+        candidate = slot.material
+        if candidate is not None and candidate.get("fs25_channel_material") == image_prop:
+            material = candidate
+            slot_index = index
+            break
+
+    active_material = obj.active_material
+    known_mask_names = set(material_names.values())
+    active_channel = (
+        active_material.get("fs25_channel_material")
+        if active_material is not None
+        else None
+    )
+    if material is None and active_material is not None and (
+        not active_channel and active_material.name not in known_mask_names
+    ):
+        material = active_material
+        slot_index = obj.active_material_index
+        material.name = material_names[image_prop]
+
+    if material is None:
+        material = bpy.data.materials.new(material_names[image_prop])
+        material.use_nodes = True
+        obj.data.materials.append(material)
+        slot_index = len(obj.material_slots) - 1
+
+    obj.active_material_index = slot_index
+    selected_polygons = [polygon for polygon in obj.data.polygons if polygon.select]
+    target_polygons = selected_polygons or obj.data.polygons
+    for polygon in target_polygons:
+        polygon.material_index = slot_index
+    material["fs25_channel_material"] = image_prop
+    setattr(settings, material_prop, material)
+    material.use_nodes = True
+
+    nodes = material.node_tree.nodes
+    node = next(
+        (
+            candidate
+            for candidate in nodes
+            if candidate.type == "TEX_IMAGE"
+            and candidate.get("fs25_channel_image_prop") == image_prop
+        ),
+        None,
+    )
+    if node is None:
+        node = nodes.new("ShaderNodeTexImage")
+        node["fs25_channel_image_prop"] = image_prop
+
+    node.name = image.name
+    node.label = image.name
+    node.image = image
+
+    principled = next(
+        (candidate for candidate in nodes if candidate.type == "BSDF_PRINCIPLED"),
+        None,
+    )
+    if principled is not None:
+        vertical_offsets = {
+            "wear_image": 220.0,
+            "ao_image": 0.0,
+            "dirt_image": -220.0,
+        }
+        node.location = (
+            principled.location.x - 320.0,
+            principled.location.y + vertical_offsets.get(image_prop, 0.0),
+        )
+        base_color = principled.inputs.get("Base Color")
+        color_output = node.outputs.get("Color")
+        if base_color is not None and color_output is not None:
+            links = material.node_tree.links
+            for link in tuple(base_color.links):
+                links.remove(link)
+            links.new(color_output, base_color)
+
+    for candidate in nodes:
+        candidate.select = False
+    node.select = True
+    nodes.active = node
+    return node
+
+
+def _activate_channel_image_for_painting(context, image):
+    """Synchronize Blender's paint canvas and visible Image Editors."""
+    image_paint = context.scene.tool_settings.image_paint
+    if hasattr(image_paint, "canvas"):
+        try:
+            image_paint.canvas = image
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            if area.type != "IMAGE_EDITOR":
+                continue
+            space = area.spaces.active
+            if hasattr(space, "image"):
+                space.image = image
+
+
+class _FS25BAKE_OT_new_black_channel:
+    image_name_input: StringProperty(name="Name", default="")
+    width: IntProperty(name="Width", default=1024, min=1, max=16384)
+    height: IntProperty(name="Height", default=1024, min=1, max=16384)
+    image_prop = ""
+    default_image_name = "FS25_Black_Channel"
+
+    def invoke(self, context, _event):
+        settings = context.scene.fs25_bake_settings
+        preferred = getattr(settings, self.image_prop, None)
+        width, height = _output_size(settings, preferred)
+        self.image_name_input = self.default_image_name
+        self.width = width
+        self.height = height
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        image_name = self.image_name_input.strip() or self.default_image_name
+        image = bpy.data.images.new(
+            image_name,
+            width=self.width,
+            height=self.height,
+            alpha=True,
+            float_buffer=False,
+        )
+        image.generated_color = (0.0, 0.0, 0.0, 1.0)
+        image.file_format = "PNG"
+        try:
+            image.colorspace_settings.name = "Non-Color"
+        except TypeError:
+            pass
+        pixels = np.zeros(self.width * self.height * 4, dtype=np.float32)
+        pixels[3::4] = 1.0
+        image.pixels.foreach_set(pixels)
+        image.update()
+        setattr(context.scene.fs25_bake_settings, self.image_prop, image)
+        _assign_channel_image_node(context, image, self.image_prop)
+        _activate_channel_image_for_painting(context, image)
+        self.report(
+            {"INFO"},
+            f"Black channel created: {image.name} · {self.width} x {self.height}",
+        )
+        return {"FINISHED"}
+
+
+class FS25BAKE_OT_new_black_wear(_FS25BAKE_OT_new_black_channel, Operator):
+    bl_idname = "fs25_bake.new_black_wear"
+    bl_label = "New Black Wear / Gloss"
+    bl_description = "Create a black Wear / Gloss painting image"
+    image_prop = "wear_image"
+    default_image_name = "FS25_Wear_Gloss"
+
+
+class FS25BAKE_OT_new_black_ao(_FS25BAKE_OT_new_black_channel, Operator):
+    bl_idname = "fs25_bake.new_black_ao"
+    bl_label = "New Black AO"
+    bl_description = "Create a black ambient occlusion image"
+    image_prop = "ao_image"
+    default_image_name = "FS25_AO"
+
+
+class FS25BAKE_OT_new_black_dirt(_FS25BAKE_OT_new_black_channel, Operator):
+    bl_idname = "fs25_bake.new_black_dirt"
+    bl_label = "New Black Dirt"
+    bl_description = "Create a black Dirt painting image"
+    image_prop = "dirt_image"
+    default_image_name = "FS25_Dirt"
+
+
+class FS25BAKE_OT_bake_ao_channel(Operator):
+    bl_idname = "fs25_bake.bake_ao_channel"
+    bl_label = "Bake AO"
+    bl_description = "Bake native Cycles ambient occlusion into the AO channel"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return bool(
+            context.scene.render.engine == "CYCLES"
+            and obj is not None
+            and obj.type == "MESH"
+            and obj.data.uv_layers
+        )
+
+    def execute(self, context):
+        settings = context.scene.fs25_bake_settings
+        width, height = _output_size(settings, settings.ao_image)
+        try:
+            image = _bake_mesh_ao(context, width, height)
+            settings.ao_image = image
+            _assign_channel_image_node(context, image, "ao_image")
+            _activate_channel_image_for_painting(context, image)
+        except RuntimeError as error:
+            self.report({"ERROR"}, f"AO bake failed: {error}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"AO baked: {width} x {height}")
+        return {"FINISHED"}
+
+
+class FS25BAKE_OT_bake_material_map(Operator):
+    bl_idname = "fs25_bake.bake_material_map"
+    bl_label = "Bake Material Map"
+    bl_description = "Bake Diffuse or tangent-space Normal through the active mesh UV"
+
+    map_type: EnumProperty(
+        name="Map Type",
+        items=(
+            ("DIFFUSE", "Diffuse", "Bake the material color without lighting"),
+            ("NORMAL", "Normal", "Bake a tangent-space normal map"),
+        ),
+        options={"HIDDEN"},
+    )
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return bool(
+            context.scene.render.engine == "CYCLES"
+            and obj is not None
+            and obj.type == "MESH"
+            and obj.data.uv_layers
+            and obj.material_slots
+        )
+
+    def execute(self, context):
+        settings = context.scene.fs25_bake_settings
+        source = (
+            settings.specular_normal_image
+            if self.map_type == "NORMAL"
+            else settings.specular_diffuse_image
+        )
+        if source is None:
+            detected_diffuse, detected_normal = _detected_material_source_images(context)
+            source = detected_normal if self.map_type == "NORMAL" else detected_diffuse
+        width, height = _output_size(settings, source)
+        try:
+            image = _bake_mesh_material_map(context, width, height, self.map_type)
+        except RuntimeError as error:
+            self.report({"ERROR"}, f"{self.map_type.title()} bake failed: {error}")
+            return {"CANCELLED"}
+
+        target_prop = "baked_normal_image" if self.map_type == "NORMAL" else "baked_diffuse_image"
+        setattr(settings, target_prop, image)
+        _activate_channel_image_for_painting(context, image)
+        self.report({"INFO"}, f"{self.map_type.title()} baked: {width} x {height}")
+        return {"FINISHED"}
+
+
+class FS25BAKE_OT_save_channel_image(Operator, ExportHelper):
+    bl_idname = "fs25_bake.save_channel_image"
+    bl_label = "Save Channel PNG"
+    bl_description = "Save this channel image as PNG"
+
+    filename_ext = ".png"
+    filter_glob: StringProperty(default="*.png", options={"HIDDEN"})
+    image_prop: StringProperty(options={"HIDDEN"})
+
+    def invoke(self, context, event):
+        image = getattr(context.scene.fs25_bake_settings, self.image_prop, None)
+        if image is None:
+            self.report({"ERROR"}, "No channel image selected")
+            return {"CANCELLED"}
+        safe_name = re.sub(r'[^A-Za-z0-9_.-]+', "_", Path(image.name).stem) or "FS25_channel"
+        self.filepath = str(Path(_blend_directory_display(context.scene.fs25_bake_settings)) / f"{safe_name}.png")
+        return ExportHelper.invoke(self, context, event)
+
+    def execute(self, context):
+        image = getattr(context.scene.fs25_bake_settings, self.image_prop, None)
+        if image is None:
+            self.report({"ERROR"}, "No channel image selected")
+            return {"CANCELLED"}
+        target = Path(bpy.path.abspath(self.filepath))
+        previous_path = image.filepath_raw
+        previous_format = image.file_format
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            image.filepath_raw = str(target)
+            image.file_format = "PNG"
+            image.save()
+        except (OSError, RuntimeError) as error:
+            image.filepath_raw = previous_path
+            image.file_format = previous_format
+            self.report({"ERROR"}, f"Channel save failed: {error}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Channel saved: {target.name}")
+        return {"FINISHED"}
+
+
 
 class FS25BAKE_OT_invert_preview_channel(Operator):
     bl_idname = "fs25_bake.invert_preview_channel"
@@ -439,10 +903,34 @@ class FS25BAKE_OT_invert_preview_channel(Operator):
     def poll(cls, context):
         settings = context.scene.fs25_bake_settings
         active = sum((settings.preview_wear, settings.preview_ao, settings.preview_dirt))
-        return not settings.preview_combined and active == 1
+        if settings.preview_combined or active != 1:
+            return False
+        selected_choice = next(
+            choice
+            for enabled, choice in (
+                (settings.preview_wear, settings.channel_r),
+                (settings.preview_ao, settings.channel_g),
+                (settings.preview_dirt, settings.channel_b),
+            )
+            if enabled
+        )
+        return selected_choice not in {"NONE", "CUSTOM"} and _mask_source_image(settings, selected_choice) is not None
 
     def execute(self, context):
-        self.report({"INFO"}, "Channel inversion will be added with image processing")
+        settings = context.scene.fs25_bake_settings
+        selections = (
+            (settings.preview_wear, "invert_red_preview", "Red"),
+            (settings.preview_ao, "invert_green_preview", "Green"),
+            (settings.preview_dirt, "invert_blue_preview", "Blue"),
+        )
+        selected = next((item for item in selections if item[0]), None)
+        if selected is None:
+            return {"CANCELLED"}
+        _active, prop_name, label = selected
+        setattr(settings, prop_name, not getattr(settings, prop_name))
+        _refresh_mask_preview_safe(settings)
+        state = "on" if getattr(settings, prop_name) else "off"
+        self.report({"INFO"}, f"{label} preview inversion: {state}")
         return {"FINISHED"}
 
 
@@ -499,6 +987,10 @@ def _write_packed_image(existing, name, width, height, red, green, blue, alpha=N
         pass
     image.pixels.foreach_set(pixels.ravel())
     image.update()
+    try:
+        image.preview_ensure().reload()
+    except (AttributeError, RuntimeError):
+        pass
     return image
 
 
@@ -582,6 +1074,119 @@ def _mask_source_image(settings, choice):
     }.get(choice)
 
 
+def _mask_choice_luminance(settings, choice, width, height, invert=False):
+    image = _mask_source_image(settings, choice)
+    if image is None:
+        return np.zeros((height, width), dtype=np.float32)
+    values = _image_luminance(image, width, height)
+    if invert:
+        values = np.float32(1.0) - values
+    return values
+
+
+def _mask_preview_size(settings):
+    preferred = next(
+        (
+            image
+            for image in (
+                settings.wear_image,
+                settings.ao_image,
+                settings.dirt_image,
+                settings.moss_image,
+            )
+            if image is not None and image.size[0] and image.size[1]
+        ),
+        None,
+    )
+    return _output_size(settings, preferred) if preferred is not None else (0, 0)
+
+
+def _refresh_mask_preview(settings):
+    """Build the combined export image and the current non-destructive display preview."""
+    width, height = _mask_preview_size(settings)
+    if width < 1 or height < 1:
+        settings.mask_preview_display_image = None
+        return None
+
+    channel_choices = (settings.channel_r, settings.channel_g, settings.channel_b)
+    inversion = (
+        settings.invert_red_preview,
+        settings.invert_green_preview,
+        settings.invert_blue_preview,
+    )
+    channels = tuple(
+        _mask_choice_luminance(settings, choice, width, height, invert=invert)
+        if choice not in {"NONE", "CUSTOM"}
+        else np.zeros((height, width), dtype=np.float32)
+        for choice, invert in zip(channel_choices, inversion)
+    )
+    alpha = (
+        np.ones((height, width), dtype=np.float32)
+        if settings.channel_a == "NONE"
+        else _mask_choice_luminance(settings, settings.channel_a, width, height)
+    )
+    label = "vMask" if settings.mask_profile == "VMASK" else "mMask"
+    settings.packed_preview_image = _write_packed_image(
+        settings.packed_preview_image,
+        f"FS25_{label}_RGB",
+        width,
+        height,
+        channels[0],
+        channels[1],
+        channels[2],
+        alpha,
+    )
+
+    if settings.preview_combined:
+        old_display = settings.mask_preview_display_image
+        settings.mask_preview_display_image = settings.packed_preview_image
+        if (
+            old_display is not None
+            and old_display is not settings.packed_preview_image
+            and old_display.name in bpy.data.images
+        ):
+            bpy.data.images.remove(old_display)
+        return settings.mask_preview_display_image
+
+    selected = []
+    if settings.preview_wear:
+        selected.append((0, channels[0]))
+    if settings.preview_ao:
+        selected.append((1, channels[1]))
+    if settings.preview_dirt:
+        selected.append((2, channels[2]))
+
+    if len(selected) == 1:
+        gray = selected[0][1]
+        red = green = blue = gray
+    else:
+        empty = np.zeros((height, width), dtype=np.float32)
+        selected_by_channel = {channel: values for channel, values in selected}
+        red = selected_by_channel.get(0, empty)
+        green = selected_by_channel.get(1, empty)
+        blue = selected_by_channel.get(2, empty)
+
+    old_display = settings.mask_preview_display_image
+    settings.mask_preview_display_image = _write_packed_image(
+        None,
+        f"FS25_{label}_Preview",
+        width,
+        height,
+        red,
+        green,
+        blue,
+        np.ones((height, width), dtype=np.float32),
+    )
+    if (
+        old_display is not None
+        and old_display is not settings.packed_preview_image
+        and old_display is not settings.mask_preview_display_image
+        and old_display.name in bpy.data.images
+    ):
+        bpy.data.images.remove(old_display)
+    return settings.mask_preview_display_image
+
+
 def _bake_mesh_ao(context, width, height):
     obj = context.active_object
     if obj is None or obj.type != "MESH":
@@ -589,7 +1194,7 @@ def _bake_mesh_ao(context, width, height):
     if not obj.data.uv_layers:
         raise RuntimeError("The active mesh has no UV map")
 
-    image = bpy.data.images.new("FS25_AO_Bake", width=width, height=height, alpha=False)
+    image = bpy.data.images.new("FS25_AO_Bake", width=width, height=height, alpha=True)
     scene = context.scene
     previous_engine = scene.render.engine
     previous_mode = obj.mode
@@ -620,7 +1225,15 @@ def _bake_mesh_ao(context, width, height):
             created_nodes.append((nodes, node))
 
         scene.render.engine = "CYCLES"
-        bpy.ops.object.bake(type="AO", margin=16, use_clear=True)
+        native_bake = scene.render.bake
+        bake_arguments = {
+            "type": "AO",
+            "margin": native_bake.margin,
+            "use_clear": native_bake.use_clear,
+        }
+        if hasattr(native_bake, "margin_type"):
+            bake_arguments["margin_type"] = native_bake.margin_type
+        bpy.ops.object.bake(**bake_arguments)
         image.update()
         return image
     except Exception:
@@ -641,6 +1254,88 @@ def _bake_mesh_ao(context, width, height):
             if obj.data.materials and obj.data.materials[-1] == temporary_material:
                 obj.data.materials.pop(index=len(obj.data.materials) - 1)
             bpy.data.materials.remove(temporary_material)
+        if previous_mode != "OBJECT":
+            bpy.ops.object.mode_set(mode=previous_mode)
+
+
+def _bake_mesh_material_map(context, width, height, bake_type):
+    """Bake the active material through the mesh UVs into a new image."""
+    obj = context.active_object
+    if obj is None or obj.type != "MESH":
+        raise RuntimeError("A mesh must be active for baking")
+    if not obj.data.uv_layers:
+        raise RuntimeError("The active mesh has no UV map")
+    if not obj.material_slots or not any(slot.material for slot in obj.material_slots):
+        raise RuntimeError("The active mesh has no material")
+
+    is_normal = bake_type == "NORMAL"
+    image_name = "FS25_Normal_Bake" if is_normal else "FS25_Diffuse_Bake"
+    image = bpy.data.images.new(image_name, width=width, height=height, alpha=True)
+    image.file_format = "PNG"
+    try:
+        image.colorspace_settings.name = "Non-Color" if is_normal else "sRGB"
+    except TypeError:
+        pass
+
+    scene = context.scene
+    previous_engine = scene.render.engine
+    previous_mode = obj.mode
+    created_nodes = []
+    previous_active_nodes = []
+    native_bake = scene.render.bake
+    previous_normal_space = getattr(native_bake, "normal_space", None)
+
+    try:
+        if previous_mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        for slot in obj.material_slots:
+            material = slot.material
+            if material is None:
+                continue
+            material.use_nodes = True
+            nodes = material.node_tree.nodes
+            previous_active_nodes.append((nodes, nodes.active))
+            for candidate in nodes:
+                candidate.select = False
+            node = nodes.new("ShaderNodeTexImage")
+            node.name = f"FS25_{bake_type}_BAKE_TARGET"
+            node.image = image
+            node.select = True
+            nodes.active = node
+            created_nodes.append((nodes, node))
+
+        scene.render.engine = "CYCLES"
+        if is_normal and hasattr(native_bake, "normal_space"):
+            native_bake.normal_space = "TANGENT"
+        bake_arguments = {
+            "type": bake_type,
+            "margin": native_bake.margin,
+            "use_clear": native_bake.use_clear,
+        }
+        if bake_type == "DIFFUSE":
+            bake_arguments["pass_filter"] = {"COLOR"}
+        if hasattr(native_bake, "margin_type"):
+            bake_arguments["margin_type"] = native_bake.margin_type
+        bpy.ops.object.bake(**bake_arguments)
+        image.update()
+        return image
+    except Exception:
+        if image.name in bpy.data.images:
+            bpy.data.images.remove(image)
+        raise
+    finally:
+        scene.render.engine = previous_engine
+        if previous_normal_space is not None and hasattr(native_bake, "normal_space"):
+            native_bake.normal_space = previous_normal_space
+        for nodes, node in created_nodes:
+            try:
+                nodes.remove(node)
+            except ReferenceError:
+                pass
+        for nodes, active in previous_active_nodes:
+            if active is not None and nodes.get(active.name) is active:
+                nodes.active = active
         if previous_mode != "OBJECT":
             bpy.ops.object.mode_set(mode=previous_mode)
 
@@ -791,15 +1486,22 @@ class FS25BAKE_OT_bake_texture(Operator):
             width, height = _output_size(settings, preferred)
 
             packed_channels = []
+            inversion = (
+                settings.invert_red_preview,
+                settings.invert_green_preview,
+                settings.invert_blue_preview,
+            )
             progress.progress_update(40)
             self.report({"INFO"}, "Reading mask channels...")
-            for choice, image in zip(choices, images):
+            for choice, image, invert in zip(choices, images, inversion):
                 if choice == "NONE":
                     packed_channels.append(np.zeros((height, width), dtype=np.float32))
                 elif choice == "CUSTOM":
                     raise RuntimeError("Custom channel does not have a texture source yet")
                 else:
-                    packed_channels.append(_image_luminance(image, width, height))
+                    packed_channels.append(
+                        _mask_choice_luminance(settings, choice, width, height, invert=invert)
+                    )
 
             alpha = None
             if settings.channel_a == "NONE":
@@ -808,7 +1510,7 @@ class FS25BAKE_OT_bake_texture(Operator):
                 alpha_image = _mask_source_image(settings, settings.channel_a)
                 if alpha_image is None:
                     raise RuntimeError("Missing Alpha channel texture")
-                alpha = _image_luminance(alpha_image, width, height)
+                alpha = _mask_choice_luminance(settings, settings.channel_a, width, height)
 
             label = "vMask" if settings.mask_profile == "VMASK" else "mMask"
             progress.progress_update(75)
@@ -824,6 +1526,7 @@ class FS25BAKE_OT_bake_texture(Operator):
                 alpha,
             )
             settings.preview_combined = True
+            _refresh_mask_preview_safe(settings)
             progress.progress_update(100)
             self.report({"INFO"}, f"{label} RGB created: {width} x {height}")
             return {"FINISHED"}
@@ -993,14 +1696,22 @@ class FS25BAKE_OT_save_preview(Operator):
     bl_description = "Save the fully combined mask"
 
     def execute(self, context):
-        self.report({"INFO"}, "Saving will be added with channel packing")
-        return {"FINISHED"}
+        settings = context.scene.fs25_bake_settings
+        try:
+            image = _refresh_mask_preview(settings)
+        except (RuntimeError, TypeError, ValueError) as error:
+            self.report({"ERROR"}, f"Preview could not be combined: {error}")
+            return {"CANCELLED"}
+        if image is None or settings.packed_preview_image is None:
+            self.report({"ERROR"}, "No mask channel image available")
+            return {"CANCELLED"}
+        return bpy.ops.fs25_bake.export_mask("INVOKE_DEFAULT")
 
 
 
 def _draw_atlas_content(layout, settings):
     atlas_type = layout.column(align=False)
-    atlas_type.prop(settings, "atlas_map_type", text="Atlas Type")
+    _draw_labeled_prop(atlas_type, settings, "atlas_map_type", "Atlas Type:")
 
     _draw_centered_title(layout, "SOURCE TEXTURES", "TEXTURE")
     layers = layout.column(align=False)
@@ -1034,7 +1745,7 @@ class FS25BAKE_PT_main(Panel):
     bl_idname = "FS25BAKE_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "FS25 Bake"
+    bl_category = "FS25 Bake Machine"
 
     def draw(self, context):
         layout = self.layout
@@ -1055,8 +1766,7 @@ class FS25BAKE_PT_main(Panel):
             not settings.mask_enabled
             or settings.mask_profile in {"CUSTOM", "ATLAS"}
         )
-        mask_row.label(text="Profile:")
-        mask_row.prop(settings, "mask_profile", text="")
+        _draw_labeled_prop(mask_row, settings, "mask_profile", "Profile:")
 
         if settings.mask_profile == "ATLAS":
             _draw_atlas_content(layout, settings)
@@ -1064,6 +1774,7 @@ class FS25BAKE_PT_main(Panel):
 
         if settings.mask_profile == "CUSTOM":
             self.draw_uv_status(context, layout)
+            self.draw_material_bakes(context, layout, settings)
             self.draw_mmask(context, layout, settings)
             self.draw_export(context, layout, settings)
             return
@@ -1074,6 +1785,7 @@ class FS25BAKE_PT_main(Panel):
             return
 
         self.draw_uv_status(context, layout)
+        self.draw_material_bakes(context, layout, settings)
         self.draw_mmask(context, layout, settings)
         if settings.mask_profile != "CUSTOM":
             self.draw_mask_preview(context, layout, settings)
@@ -1094,9 +1806,9 @@ class FS25BAKE_PT_main(Panel):
         body = layout.column(align=False)
         body.separator(factor=0.5)
         if settings.mask_profile == "MMASK":
-            body.prop(settings, "mmask_shader")
+            _draw_labeled_prop(body, settings, "mmask_shader", "Shader:")
         elif settings.mask_profile == "VMASK":
-            body.prop(settings, "vmask_shader")
+            _draw_labeled_prop(body, settings, "vmask_shader", "Shader:")
         else:
             FS25BAKE_PT_main.draw_specular(context, body, settings)
             return
@@ -1107,13 +1819,11 @@ class FS25BAKE_PT_main(Panel):
             ("Ambient Occlusion | AO", "Green", "channel_g", "ao_image"),
             ("Dirt", "Blue", "channel_b", "dirt_image"),
         ):
-            _draw_mask_channel(body, settings, title, color_name, channel_prop, image_prop)
+            _draw_mask_channel(context, body, settings, title, color_name, channel_prop, image_prop)
 
         _draw_centered_title(body, "Additional Channels")
         advanced = body.column(align=False)
-        alpha_row = advanced.row(align=True)
-        alpha_row.label(text="Alpha:")
-        alpha_row.prop(settings, "channel_a", text="")
+        _draw_labeled_prop(advanced, settings, "channel_a", "Alpha:")
         advanced.template_ID(settings, "moss_image", new="image.new", open="image.open")
 
         body.separator()
@@ -1156,7 +1866,7 @@ class FS25BAKE_PT_main(Panel):
 
         _draw_centered_title(layout, "AMBIENT OCCLUSION | AO", "SHADING_RENDERED")
         ao_box = layout.column(align=False)
-        ao_box.prop(settings, "specular_ao_mode", text="Source")
+        _draw_labeled_prop(ao_box, settings, "specular_ao_mode", "Source:")
         detected_ao = None
         if settings.specular_ao_mode == "TEXTURE":
             ao_box.template_ID(
@@ -1236,7 +1946,7 @@ class FS25BAKE_PT_main(Panel):
         info = _active_mesh_uv_info(context)
 
         bake_settings = body.column(align=False)
-        bake_uv = bake_settings.row(align=True)
+        bake_uv = bake_settings.split(factor=0.36, align=True)
         bake_uv.label(text="Bake UV")
         detected_target = info["detected_target"] if info else None
         if detected_target:
@@ -1246,9 +1956,7 @@ class FS25BAKE_PT_main(Panel):
         else:
             bake_uv.prop(settings, "bake_uv_mode", text="")
 
-        resolution = bake_settings.row(align=True)
-        resolution.label(text="Resolution")
-        resolution.prop(settings, "output_resolution", text="")
+        _draw_labeled_prop(bake_settings, settings, "output_resolution", "Resolution")
 
         preview = body.column(align=False)
         combined = preview.row(align=True)
@@ -1257,29 +1965,43 @@ class FS25BAKE_PT_main(Panel):
 
         channels = preview.row(align=True)
         channels.enabled = not settings.preview_combined
-        channels.prop(settings, "preview_wear", text="Wear R")
-        channels.prop(settings, "preview_ao", text="AO G")
-        channels.prop(settings, "preview_dirt", text="Dirt B")
+        channels.prop(
+            settings,
+            "preview_wear",
+            text=f"R · {CHANNEL_LABELS.get(settings.channel_r, settings.channel_r)}",
+        )
+        channels.prop(
+            settings,
+            "preview_ao",
+            text=f"G · {CHANNEL_LABELS.get(settings.channel_g, settings.channel_g)}",
+        )
+        channels.prop(
+            settings,
+            "preview_dirt",
+            text=f"B · {CHANNEL_LABELS.get(settings.channel_b, settings.channel_b)}",
+        )
+
+        inverted = []
+        if settings.invert_red_preview:
+            inverted.append("R")
+        if settings.invert_green_preview:
+            inverted.append("G")
+        if settings.invert_blue_preview:
+            inverted.append("B")
+        if inverted:
+            preview.label(text=f"Inverted: {', '.join(inverted)}", icon="ARROW_LEFTRIGHT")
 
         display = preview.box()
-        preview_image = None
-        if settings.preview_combined:
-            preview_image = settings.packed_preview_image
-        else:
-            selected = []
-            if settings.preview_wear and settings.wear_image:
-                selected.append(settings.wear_image)
-            if settings.preview_ao and settings.ao_image:
-                selected.append(settings.ao_image)
-            if settings.preview_dirt and settings.dirt_image:
-                selected.append(settings.dirt_image)
-            if len(selected) == 1:
-                preview_image = selected[0]
-            elif len(selected) > 1:
-                preview_image = settings.packed_preview_image
+        preview_image = settings.mask_preview_display_image
 
         if preview_image is not None:
-            display.template_preview(preview_image, show_buttons=False)
+            display.template_ID_preview(
+                settings,
+                "mask_preview_display_image",
+                rows=6,
+                cols=6,
+                hide_buttons=True,
+            )
         else:
             display.separator(factor=2.0)
             message = (
@@ -1294,7 +2016,40 @@ class FS25BAKE_PT_main(Panel):
 
         actions = body.row(align=True)
         actions.operator("fs25_bake.invert_preview_channel", icon="ARROW_LEFTRIGHT")
-        actions.operator("fs25_bake.save_preview", icon="FILE_TICK")
+        save = actions.row(align=True)
+        save.enabled = settings.packed_preview_image is not None
+        save.operator("fs25_bake.save_preview", icon="FILE_TICK")
+
+    @staticmethod
+    def draw_material_bakes(context, layout, settings):
+        box = layout.box()
+        if not _draw_collapsible_header(
+            box, settings, "show_material_bakes", "Material Bakes", "RENDER_STILL"
+        ):
+            return
+
+        body = layout.column(align=False)
+        detected_diffuse, detected_normal = _detected_material_source_images(context)
+        _draw_labeled_prop(body, settings, "output_resolution", "Resolution")
+        source_info = body.box()
+        source_info.label(
+            text=f"Diffuse source: {detected_diffuse.name}" if detected_diffuse else "Diffuse source: Not detected",
+            icon="CHECKMARK" if detected_diffuse else "INFO",
+        )
+        source_info.label(
+            text=f"Normal source: {detected_normal.name}" if detected_normal else "Normal source: Not detected",
+            icon="CHECKMARK" if detected_normal else "INFO",
+        )
+        _draw_material_map_bake(
+            context, body, settings, "Diffuse", "DIFFUSE", "baked_diffuse_image"
+        )
+        _draw_material_map_bake(
+            context, body, settings, "Normal", "NORMAL", "baked_normal_image"
+        )
+        if context.scene.render.engine != "CYCLES":
+            warning = body.box()
+            warning.alert = True
+            warning.label(text="Cycles must be active for native material baking.", icon="ERROR")
 
     @staticmethod
     def draw_uv_status(context, layout):
@@ -1413,6 +2168,12 @@ CLASSES = (
     FS25BakePreferences,
     FS25BAKE_OT_scan_shader_folder,
     FS25BakeSettings,
+    FS25BAKE_OT_new_black_wear,
+    FS25BAKE_OT_new_black_ao,
+    FS25BAKE_OT_new_black_dirt,
+    FS25BAKE_OT_bake_ao_channel,
+    FS25BAKE_OT_bake_material_map,
+    FS25BAKE_OT_save_channel_image,
     FS25BAKE_OT_bake_texture,
     FS25BAKE_OT_confirm_export_name,
     FS25BAKE_OT_export_mask,
